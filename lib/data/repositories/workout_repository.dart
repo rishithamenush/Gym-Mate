@@ -10,17 +10,16 @@ class WorkoutRepository {
   // Workout completion methods
   Future<bool> completeWorkout(int dayNumber, {required int durationInSeconds}) async {
     try {
-      // First check if workout was already completed today
-      bool alreadyCompleted = await _databaseHelper.isWorkoutCompletedToday(dayNumber);
-      if (alreadyCompleted) {
-        return false;
-      }
-
       // Record the workout completion with duration
-      await _databaseHelper.recordWorkoutCompletion(
-        dayNumber,
-        durationInSeconds: durationInSeconds,
-      );
+      await _databaseHelper.recordWorkoutCompletion(dayNumber, durationInSeconds);
+      
+      // Update the workout day's completion status
+      await _databaseHelper.updateWorkoutDay(dayNumber, {
+        'is_completed': 1,
+        'completion_date': DateTime.now().toIso8601String(),
+        'duration': durationInSeconds,
+      });
+      
       return true;
     } catch (e) {
       print('Error completing workout: $e');
@@ -42,13 +41,7 @@ class WorkoutRepository {
     try {
       // Check if any workouts were completed this week
       final completedWorkouts = await _databaseHelper.getCompletedWorkoutsForCurrentWeek();
-      if (completedWorkouts.isEmpty) {
-        return false;
-      }
-
-      // Check if progress was already recorded this week
-      bool alreadyRecorded = await _databaseHelper.isProgressRecordedForCurrentWeek();
-      return !alreadyRecorded;
+      return completedWorkouts.isNotEmpty;
     } catch (e) {
       print('Error checking progress eligibility: $e');
       return false;
@@ -57,7 +50,7 @@ class WorkoutRepository {
 
   Future<bool> recordWeeklyProgress(double weight) async {
     try {
-      await _databaseHelper.recordWeeklyProgress(weight);
+      await _databaseHelper.recordProgress(weight);
       return true;
     } catch (e) {
       print('Error recording progress: $e');
@@ -95,7 +88,15 @@ class WorkoutRepository {
   // Workout days and exercises methods
   Future<void> saveWorkoutDay(Map<String, dynamic> workoutDay, List<Map<String, dynamic>> exercises) async {
     try {
-      await _databaseHelper.saveWorkoutDay(workoutDay, exercises);
+      final db = await _databaseHelper.database;
+      await db.transaction((txn) async {
+        final workoutDayId = await txn.insert('workout_days', workoutDay);
+        
+        for (var exercise in exercises) {
+          exercise['day_number'] = workoutDayId;
+          await txn.insert('exercises', exercise);
+        }
+      });
     } catch (e) {
       print('Error saving workout day: $e');
       rethrow;
@@ -113,7 +114,7 @@ class WorkoutRepository {
 
   Future<List<Map<String, dynamic>>> getExercisesForDay(int workoutDayId) async {
     try {
-      return await _databaseHelper.getExercisesForWorkoutDay(workoutDayId);
+      return await _databaseHelper.getExercisesForDay(workoutDayId);
     } catch (e) {
       print('Error getting exercises for day: $e');
       return [];
@@ -122,12 +123,7 @@ class WorkoutRepository {
 
   Future<void> clearWorkoutHistory() async {
     try {
-      final db = await _databaseHelper.database;
-      await db.transaction((txn) async {
-        await txn.delete('workout_completions');
-        await txn.delete('progress');
-        await txn.update('workout_days', {'is_completed': 0});
-      });
+      await _databaseHelper.clearAllData();
     } catch (e) {
       print('Error clearing workout history: $e');
       rethrow;
@@ -135,96 +131,60 @@ class WorkoutRepository {
   }
 
   Future<void> insertWorkoutDay(Map<String, dynamic> workoutDay) async {
-    final db = await _databaseHelper.database;
-    await db.insert(
-      'workout_days',
-      {
-        'day_number': workoutDay['day'],
-        'title': workoutDay['title'],
-        'is_completed': 0,
-        'completion_date': null,
-        'duration': 0,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    try {
+      await _databaseHelper.insertWorkoutDay(workoutDay);
+    } catch (e) {
+      print('Error inserting workout day: $e');
+      rethrow;
+    }
   }
 
   Future<void> insertExercise(Map<String, dynamic> exercise) async {
-    final db = await _databaseHelper.database;
-    await db.insert(
-      'exercises',
-      {
-        'day_number': exercise['day_number'],
-        'name': exercise['name'],
-        'sets': exercise['sets'],
-        'tips': exercise['tips'],
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    try {
+      await _databaseHelper.insertExercise(exercise);
+    } catch (e) {
+      print('Error inserting exercise: $e');
+      rethrow;
+    }
   }
 
-  Future<void> markWorkoutComplete(int dayNumber, int duration) async {
-    final db = await _databaseHelper.database;
-    await db.update(
-      'workout_days',
-      {
-        'is_completed': 1,
-        'completion_date': DateTime.now().toIso8601String(),
-        'duration': duration,
-      },
-      where: 'day_number = ?',
-      whereArgs: [dayNumber],
-    );
+  Future<void> updateWorkoutDay(int dayNumber, Map<String, dynamic> workoutDayData, List<Map<String, dynamic>> exercisesData) async {
+    try {
+      final db = await _databaseHelper.database;
+      await db.transaction((txn) async {
+        // Update workout day
+        await txn.update(
+          'workout_days',
+          workoutDayData,
+          where: 'day_number = ?',
+          whereArgs: [dayNumber],
+        );
+        
+        // Delete existing exercises
+        await txn.delete(
+          'exercises',
+          where: 'day_number = ?',
+          whereArgs: [dayNumber],
+        );
+        
+        // Insert new exercises
+        for (var exercise in exercisesData) {
+          exercise['day_number'] = dayNumber;
+          await txn.insert('exercises', exercise);
+        }
+      });
+    } catch (e) {
+      print('Error updating workout day: $e');
+      rethrow;
+    }
   }
 
   Future<void> deleteWorkoutDay(int dayNumber) async {
-    final db = await _databaseHelper.database;
-    
-    await db.transaction((txn) async {
-      // Delete exercises first (foreign key constraint)
-      await txn.delete(
-        'exercises',
-        where: 'day_number = ?',
-        whereArgs: [dayNumber],
-      );
-      
-      // Delete workout day
-      await txn.delete(
-        'workout_days',
-        where: 'day_number = ?',
-        whereArgs: [dayNumber],
-      );
-    });
-  }
-
-  Future<void> updateWorkoutDay(
-    int dayNumber,
-    Map<String, dynamic> workoutDayData,
-    List<Map<String, dynamic>> exercisesData,
-  ) async {
-    final db = await _databaseHelper.database;
-    
-    await db.transaction((txn) async {
-      // Update workout day
-      await txn.update(
-        'workout_days',
-        workoutDayData,
-        where: 'day_number = ?',
-        whereArgs: [dayNumber],
-      );
-      
-      // Delete existing exercises
-      await txn.delete(
-        'exercises',
-        where: 'day_number = ?',
-        whereArgs: [dayNumber],
-      );
-      
-      // Insert new exercises
-      for (var exercise in exercisesData) {
-        exercise['day_number'] = dayNumber;
-        await txn.insert('exercises', exercise);
-      }
-    });
+    try {
+      await _databaseHelper.deleteWorkoutDay(dayNumber);
+    } catch (e) {
+      print('Error deleting workout day: $e');
+      rethrow;
+    }
   }
 } 
