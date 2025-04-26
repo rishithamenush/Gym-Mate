@@ -40,6 +40,12 @@ class WorkoutProvider with ChangeNotifier {
   WorkoutDay? get currentWorkoutDay => _currentWorkoutDay;
   Map<int, Duration> get lastWorkoutDurations => _lastWorkoutDurations;
 
+  // Initialize the provider
+  Future<void> initialize() async {
+    await _initializeWorkoutDays();
+    await _loadWorkoutState();
+  }
+
   // Initialize workout days with default data if none exist
   Future<void> _initializeWorkoutDays() async {
     try {
@@ -436,5 +442,4 @@ class WorkoutProvider with ChangeNotifier {
       rethrow;
     }
   }
-} 
 } 
