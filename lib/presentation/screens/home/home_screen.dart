@@ -476,9 +476,18 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           Consumer<WorkoutProvider>(
             builder: (context, workoutProvider, child) {
-              final workoutDays = workoutProvider.workoutDays;
+              // Get unique workout days by day number
+              final uniqueWorkoutDays = workoutProvider.workoutDays.fold<Map<int, WorkoutDay>>(
+                {},
+                (map, day) {
+                  if (!map.containsKey(day.dayNumber)) {
+                    map[day.dayNumber] = day;
+                  }
+                  return map;
+                },
+              ).values.toList();
 
-              if (workoutDays.isEmpty) {
+              if (uniqueWorkoutDays.isEmpty) {
                 return Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
@@ -561,9 +570,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                itemCount: workoutDays.length,
+                itemCount: uniqueWorkoutDays.length,
                 itemBuilder: (context, index) {
-                  final workoutDay = workoutDays[index];
+                  final workoutDay = uniqueWorkoutDays[index];
                   final isCompleted = workoutProvider.isDayCompleted(workoutDay.dayNumber);
                   final lastDuration = workoutProvider.getLastWorkoutDuration(workoutDay.dayNumber);
                   final isToday = workoutProvider.currentWorkoutDay?.dayNumber == workoutDay.dayNumber;

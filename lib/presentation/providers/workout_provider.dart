@@ -46,54 +46,41 @@ class WorkoutProvider with ChangeNotifier {
     await _loadWorkoutState();
   }
 
-  // Initialize workout days with default data if none exist
   Future<void> _initializeWorkoutDays() async {
     try {
-      final workoutDaysData = await _repository.getWorkoutDays();
-      if (workoutDaysData.isEmpty) {
-        // If no workout days exist, initialize with default data
-        _workoutDays = WorkoutData.workoutDays;
-        for (var workoutDay in _workoutDays) {
-          await addWorkoutDay(workoutDay);
-        }
-      } else {
-        _workoutDays = [];
-        for (var dayData in workoutDaysData) {
-          final exercises = await _repository.getExercisesForDay(dayData['id'] as int);
-          
-          // Load last workout duration for this day
-          final lastWorkout = await _repository.getLastWorkoutForDay(dayData['day_number'] as int);
-          if (lastWorkout != null) {
-            _lastWorkoutDurations[dayData['day_number'] as int] = 
-                Duration(seconds: lastWorkout['duration'] as int);
-          }
+      // Clear existing workout days first
+      _workoutDays.clear();
 
-          _workoutDays.add(
-            WorkoutDay(
-              dayNumber: dayData['day_number'] as int,
-              title: dayData['title'] as String,
-              exercises: exercises.map((e) => Exercise(
-                name: e['name'] as String,
-                sets: e['sets'] as String,
-                tips: e['tips'] as String,
-                reps: e['reps'] as int,
-                notes: e['notes'] as String?,
-              )).toList(),
-              isCompleted: dayData['is_completed'] == 1,
-            ),
-          );
+      // Load the updated workout days from the repository
+      final workoutDaysData = await _repository.getWorkoutDays();
+
+      for (var dayData in workoutDaysData) {
+        final exercises = await _repository.getExercisesForDay(dayData['id'] as int);
+        final lastWorkout = await _repository.getLastWorkoutForDay(dayData['day_number'] as int);
+
+        if (lastWorkout != null) {
+          _lastWorkoutDurations[dayData['day_number'] as int] = Duration(seconds: lastWorkout['duration'] as int);
         }
+
+        _workoutDays.add(WorkoutDay(
+          dayNumber: dayData['day_number'] as int,
+          title: dayData['title'] as String,
+          exercises: exercises.map((e) => Exercise(
+            name: e['name'] as String,
+            sets: e['sets'] as String,
+            reps: e['reps'] as int,
+            tips: e['tips'] as String,
+            notes: e['notes'] as String?,
+          )).toList(),
+          isCompleted: dayData['is_completed'] == 1,
+        ));
       }
-      
+
       // Set current workout day
       _setCurrentWorkoutDay();
       notifyListeners();
     } catch (e) {
       print('Error initializing workout days: $e');
-      // Initialize with default data if there's an error
-      _workoutDays = WorkoutData.workoutDays;
-      _setCurrentWorkoutDay();
-      notifyListeners();
     }
   }
 
@@ -202,6 +189,17 @@ class WorkoutProvider with ChangeNotifier {
 
   Future<void> addWorkoutDay(WorkoutDay workoutDay) async {
     try {
+      // Check if a workout day with the same day number already exists
+      final existingWorkoutDayIndex = _workoutDays.indexWhere(
+        (day) => day.dayNumber == workoutDay.dayNumber,
+      );
+
+      if (existingWorkoutDayIndex != -1) {
+        // If it exists, update it instead of adding a new one
+        await updateWorkoutDay(workoutDay);
+        return;
+      }
+
       // Prepare data for database
       final workoutDayData = {
         'day_number': workoutDay.dayNumber,

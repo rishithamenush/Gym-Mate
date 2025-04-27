@@ -85,21 +85,41 @@ class DatabaseHelper {
 
   Future<void> updateWorkoutDay(int dayNumber, Map<String, dynamic> workoutDay) async {
     final db = await database;
-    await db.update(
-      'workout_days',
-      workoutDay,
-      where: 'day_number = ?',
-      whereArgs: [dayNumber],
-    );
+    await db.transaction((txn) async {
+      // Update workout day
+      await txn.update(
+        'workout_days',
+        workoutDay,
+        where: 'day_number = ?',
+        whereArgs: [dayNumber],
+      );
+
+      // Delete existing exercises
+      await txn.delete(
+        'exercises',
+        where: 'day_number = ?',
+        whereArgs: [dayNumber],
+      );
+    });
   }
 
   Future<void> deleteWorkoutDay(int dayNumber) async {
     final db = await database;
-    await db.delete(
-      'workout_days',
-      where: 'day_number = ?',
-      whereArgs: [dayNumber],
-    );
+    await db.transaction((txn) async {
+      // Delete exercises first (due to foreign key constraint)
+      await txn.delete(
+        'exercises',
+        where: 'day_number = ?',
+        whereArgs: [dayNumber],
+      );
+
+      // Then delete the workout day
+      await txn.delete(
+        'workout_days',
+        where: 'day_number = ?',
+        whereArgs: [dayNumber],
+      );
+    });
   }
 
   // Exercises Methods
